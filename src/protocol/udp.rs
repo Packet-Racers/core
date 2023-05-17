@@ -1,23 +1,18 @@
 use async_trait::async_trait;
-use std::io;
+use std::{io, sync::Arc};
 use std::net::SocketAddr;
 use tokio::net::{lookup_host, ToSocketAddrs, UdpSocket};
 
 use super::Protocol;
 
 pub struct Udp {
-  socket: UdpSocket,
+  socket: Arc<UdpSocket>,
   remote_addr: SocketAddr,
 }
 
 impl Udp {
-  pub async fn new<A: ToSocketAddrs>(addr: A) -> Result<Self, io::Error> {
+  pub async fn new<A: ToSocketAddrs>(addr: A, socket: Arc<UdpSocket>) -> Result<Self, io::Error> {
     let remote_addr = lookup_host(addr).await?.next().expect("no remote address");
-    let socket = UdpSocket::bind(remote_addr).await.map_err(|e| {
-      log::debug!("Error binding UDP socket: {}", e);
-      e
-    })?;
-
     Ok(Self {
       socket,
       remote_addr,
