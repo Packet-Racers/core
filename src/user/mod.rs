@@ -1,8 +1,8 @@
-use std::io::{Read, Write};
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::thread;
-use std::{io, net::TcpListener};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, UdpSocket};
 use uuid::Uuid;
 
 use crate::file_transfer::{FileTransfer, TransferOptions};
@@ -15,13 +15,22 @@ use crate::protocol::{Protocol, ProtocolType};
 pub struct User {
   id: Uuid,
   addr: SocketAddr,
+  tcp_listener: Arc<TcpListener>,
+  udp_listener: Arc<UdpSocket>,
+}
+
+struct UdpPacket {
+  src_addr: SocketAddr,
+  payload: Vec<u8>,
 }
 
 impl User {
-  pub fn new(addr: SocketAddr) -> Self {
+  pub async fn new(addr: SocketAddr) -> Self {
     Self {
       id: Uuid::new_v4(),
       addr,
+      tcp_listener: Arc::new(TcpListener::bind(addr).await.unwrap()),
+      udp_listener: Arc::new(UdpSocket::bind(addr).await.unwrap()),
     }
   }
 
@@ -34,49 +43,65 @@ impl User {
   }
 
   pub fn start_listening(self: Arc<Self>) -> Result<(), io::Error> {
-    // Listen for both TCP and UDP in the same address in different threads
-    let tcp_listener = TcpListener::bind(self.addr)?;
-    // let udp_listener = self.addr;
+    let tcp_listener = Arc::clone(&self.tcp_listener);
+    let udp_listener = Arc::clone(&self.udp_listener);
 
-    // Save the file received in the TCP lister as tcp.txt
-    thread::spawn(move || {
+    tokio::spawn(async move {
       let mut buffer = [0; 1024];
-      let (mut stream, src_addr) = tcp_listener.accept().unwrap();
-      log::debug!("[{}] Received connection from: {}", self.addr, src_addr);
-
-      let mut file = std::fs::File::create("received.txt").unwrap();
       loop {
-        let number_of_bytes = stream.read(&mut buffer).unwrap();
-        log::debug!(
-          "[{}] Received {} bytes from: {}",
-          self.addr,
-          number_of_bytes,
-          src_addr
-        );
+        let (mut stream, src_addr) = tcp_listener.accept().await.unwrap();
+        log::debug!("[{}] Received connection from: {}", self.addr, src_addr);
 
-        if number_of_bytes == 0 {
-          break;
+        let mut file = tokio::fs::File::create("received.txt").await.unwrap();
+        loop {
+          let number_of_bytes = stream.read(&mut buffer).await.unwrap();
+          log::debug!(
+            "[{}] Received {} bytes from: {}",
+            self.addr,
+            number_of_bytes,
+            src_addr
+          );
+
+          if number_of_bytes == 0 {
+            break;
+          }
+
+          file.write_all(&buffer[..number_of_bytes]).await.unwrap();
         }
-
-        file.write_all(&buffer[..number_of_bytes]).unwrap();
       }
     });
 
-    // Save the file received in the UDP lister as udp.txt
-    // thread::spawn(move || {
-    //   let mut buffer = [0; 1024];
-    //   let socket = std::net::UdpSocket::bind(udp_listener).unwrap();
-    //
-    //   loop {
-    //     let (number_of_bytes, src_addr) = socket.recv_from(&mut buffer).unwrap();
-    //     println!("Received {} bytes from: {}", number_of_bytes, src_addr);
-    //
-    //     let mut file = std::fs::File::create("udp.txt").unwrap();
-    //     file.write_all(&buffer).unwrap();
-    //   }
-    // });
+    tokio::spawn(async move {
+      let mut buffer = [0; 1024];
+      println!("Waiting for UDP connection...");
+
+      loop {
+        let (number_of_bytes, src_addr) = udp_listener.recv_from(&mut buffer).await.unwrap();
+        println!("Received {} bytes from: {}", number_of_bytes, src_addr);
+
+        let packet = UdpPacket {
+          src_addr,
+          payload: buffer[..number_of_bytes].to_vec(),
+        };
+
+        Self::handle_udp_packet(packet).await;
+      }
+    });
 
     Ok(())
+  }
+
+  async fn handle_udp_packet(packet: UdpPacket) {
+    let UdpPacket { payload, .. } = packet;
+
+    let mut file = tokio::fs::OpenOptions::new()
+      .create(true)
+      .append(true)
+      .open("udp.txt")
+      .await
+      .unwrap();
+
+    file.write_all(&payload).await.unwrap();
   }
 
   pub fn id(&self) -> &Uuid {
@@ -98,7 +123,7 @@ impl User {
         TransferOptions::new(100, Box::new(protocol))
       }
       ProtocolType::Udp => {
-        let protocol = Udp::new(receiver.addr().to_owned()).await?;
+        let protocol = Udp::new(receiver.addr().to_owned(), self.udp_listener.clone()).await?;
         TransferOptions::new(100, Box::new(protocol))
       }
       ProtocolType::GuaranteedUdp => {
