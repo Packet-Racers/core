@@ -13,6 +13,11 @@ pub enum ProtocolType {
   GuaranteedUdp,
 }
 
+#[cfg(feature = "guaranteed_udp")]
 pub mod guaranteed_udp;
+
+#[cfg(feature = "tcp")]
 pub mod tcp;
+
+#[cfg(feature = "udp")]
 pub mod udp;
