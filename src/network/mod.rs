@@ -28,13 +28,14 @@ impl Network {
 
           let data = String::from_utf8_lossy(&buffer[..read_bytes]);
           let parts: Vec<&str> = data.split("://").collect();
+
           let protocol = parts[0];
           let data = parts[1];
 
           self.handle_protocol(protocol, data, &mut stream).await?;
         }
         Err(e) => {
-          println!("Connection failed: {}", e);
+          eprintln!("Connection failed because: {}", e);
         }
       }
     }

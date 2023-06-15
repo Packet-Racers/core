@@ -7,17 +7,31 @@ pub trait Protocol {
   fn name(&self) -> &str;
 }
 
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum ProtocolType {
   Tcp,
   Udp,
   GuaranteedUdp,
 }
 
-#[cfg(feature = "guaranteed_udp")]
+impl std::str::FromStr for ProtocolType {
+  type Err = String;
+
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    match s {
+      "tcp" | "Tcp" => Ok(Self::Tcp),
+      "udp" | "Udp" => Ok(Self::Udp),
+      "gudp" | "GuaranteedUdp" => Ok(Self::GuaranteedUdp),
+      _ => Err(format!("Unknown protocol: {}", s)),
+    }
+  }
+}
+
+// #[cfg(feature = "guaranteed_udp")]
 pub mod guaranteed_udp;
 
-#[cfg(feature = "tcp")]
+// #[cfg(feature = "tcp")]
 pub mod tcp;
 
-#[cfg(feature = "udp")]
+// #[cfg(feature = "udp")]
 pub mod udp;

@@ -50,6 +50,8 @@ impl User {
     let tcp_listener = Arc::clone(&self.tcp_listener);
     let udp_listener = Arc::clone(&self.udp_listener);
 
+    println!("Listening on: {}", self.addr);
+
     tokio::spawn(async move {
       let mut buffer = [0; 1024];
       loop {
@@ -141,7 +143,11 @@ impl User {
   }
 
   pub async fn connect_to_network(&self, network_addr: SocketAddr) -> io::Result<()> {
-    let mut stream = TcpStream::connect(network_addr).await?;
+    println!("Connecting to network: {}", network_addr);
+    let mut stream = TcpStream::connect("localhost:8080").await.map_err(|e| {
+      println!("Error connecting to network: {}", e);
+      e
+    })?;
 
     // include the protocol in your message
     let message = format!("@enter://{},{}", self.addr, self.id);
@@ -151,6 +157,11 @@ impl User {
     networks.push(network_addr);
 
     Ok(())
+  }
+
+  pub async fn networks(&self) -> Vec<SocketAddr> {
+    let networks = self.networks.lock().await;
+    networks.clone()
   }
 
   pub async fn exit_network(&mut self, network_addr: SocketAddr) -> io::Result<()> {
